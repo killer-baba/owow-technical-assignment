@@ -2,6 +2,8 @@
 
 > AI-driven campaign recommendation engine powered by a polyglot database stack — vector search, graph traversal, and real-time analytics unified in a single platform.
 
+![Architecture](./Architecture_Diagram.png)
+
 ---
 
 ## What This Does
@@ -23,17 +25,18 @@ Chat Message → Embedding → Milvus (find similar users)
 | Store | Technology | Role |
 |---|---|---|
 | Document | MongoDB 7 | Raw conversations + dead-letter queue |
-| Vector | Milvus 2.4 | 768-dim semantic embeddings + ANN search |
+| Vector | Milvus 2.4 | 1024-dim semantic embeddings + ANN search |
 | Graph | Neo4j 5 | User → Campaign → Intent relationships |
 | Analytics | SQLite → BigQuery | Aggregated engagement metrics |
 | Cache | Redis 7 | Session + recommendation cache (TTL 5min) |
-| Embeddings | `all-mpnet-base-v2` | Sentence-Transformers, 768-dim |
+| Embeddings | `intfloat/e5-large-v2` | Sentence-Transformers, 1024-dim |
 | API | FastAPI + Uvicorn | `/recommendations/<user_id>` |
 | Orchestration | Python DAG / Airflow | ETL pipeline |
 | Dashboard | Streamlit | Live metrics + recommendation demo |
 
-→ Full design decisions and trade-offs: [`docs/architecture.md`](./docs/architecture.md)
-→ Scaling to 10M+ users: [`docs/scaling_plan.md`](./docs/scaling_plan.md)
+→ Full design decisions and trade-offs: [`architecture.md`](./architecture.md)
+→ End-to-end data flow diagrams: [`data_flow.md`](./data_flow.md)
+→ Scaling to 10M+ users: [`scaling_plan.md`](./scaling_plan.md)
 
 ---
 
@@ -80,7 +83,7 @@ Pipeline run complete | total=30 ok=28 dlq=2 status=partial
 > The 2 DLQ records are intentional — sample data includes a blank message
 > and a user_id with spaces to demonstrate schema validation.
 
-> First run downloads the embedding model (~420MB, cached after that).
+> First run downloads the embedding model (~1.3GB, cached after that).
 
 ### 4. Start the API
 
@@ -93,10 +96,23 @@ python -u -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 Open a new terminal:
 
 ```bash
-python -u -m streamlit run dashboard.py
+python -u -m streamlit run streamlit_dashboard.py
 ```
 
-Opens at **`http://localhost:8501`**
+---
+
+## Service URLs
+
+| Service | URL | Credentials |
+|---|---|---|
+| FastAPI (Recommendations API) | http://localhost:8000 | — |
+| FastAPI Interactive Docs | http://localhost:8000/docs | — |
+| Streamlit Dashboard | http://localhost:8501 | — |
+| Neo4j Browser | http://localhost:7474 | neo4j / neo4j123 |
+| MinIO Console (Milvus storage) | http://localhost:9001 | minioadmin / minioadmin123 |
+| MongoDB | localhost:27017 | admin / admin123 |
+| Redis | localhost:6379 | password: redis123 |
+| Milvus gRPC | localhost:19530 | — |
 
 ---
 
@@ -128,21 +144,27 @@ curl http://localhost:8000/recommendations/u001
 | Cache hit (Redis) | ~2ms |
 | Cache miss (full retrieval) | ~100–200ms |
 
-Interactive docs at **`http://localhost:8000/docs`**
+---
+
+## Screenshots
+
+### Successful Pipeline Run
+![Pipeline Run](./Screenshots/Successfull_pipeline_run.png)
+
+### API Response — Cache Miss (full retrieval)
+![API Cache Miss](./Screenshots/Streamlit_api_response_cache_miss.png)
+
+### API Response — Cache Hit (Redis, ~2ms)
+![API Cache Hit](./Screenshots/Streamlit_api_response_cache_hit.png)
+
+### Neo4j Graph — User → Campaign Relationships
+![Neo4j Graph](./Screenshots/Neo4j_Vector_Distribution.png)
+
+### API Response Structure
+![API Response](./Screenshots/Api_response_structure.png)
 
 ---
 
-
-## Documentation
-
-| Document | Description |
-|---|---|
-| [`docs/architecture.md`](./docs/architecture.md) | Design decisions and trade-offs for every component |
-| [`docs/architecture_diagram.md`](./docs/architecture_diagram.md) | Mermaid system diagrams |
-| [`docs/data_flow.md`](./docs/data_flow.md) | End-to-end data movement across every layer |
-| [`docs/scaling_plan.md`](./docs/scaling_plan.md) | How to evolve this to 10M+ users |
-
----
 ## Project Structure
 
 ```
@@ -167,11 +189,33 @@ Interactive docs at **`http://localhost:8000/docs`**
 │       └── main.py            # FastAPI — /recommendations/<user_id>
 ├── data/
 │   └── sample_conversations.json
-├── dashboard.py               # Streamlit metrics dashboard
+├── Screenshots/
+│   ├── Successfull_pipeline_run.png
+│   ├── Api_response_structure.png
+│   ├── Neo4j_Vector_Distribution.png
+│   ├── Streamlit_api_response_cache_hit.png
+│   └── Streamlit_api_response_cache_miss.png             
+├── streamlit_dashboard.py     # Streamlit metrics dashboard
 ├── docker-compose.yml
 ├── .env
-└── requirements.txt
+├── requirements.txt
+├── architecture_diagram.md    # Mermaid system diagram
+├── Architecture_Diagram.png   # PNG export of architecture diagram
+├── architecture.md            # Design decisions + trade-offs
+├── data_flow.md               # End-to-end data movement diagrams
+└── scaling_plan.md            # 10M+ users scaling roadmap
 ```
+
+---
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [`architecture.md`](./architecture.md) | Design decisions and trade-offs for every component |
+| [`architecture_diagram.md`](./architecture_diagram.md) | Mermaid system diagram |
+| [`data_flow.md`](./data_flow.md) | End-to-end data movement across every layer |
+| [`scaling_plan.md`](./scaling_plan.md) | How to evolve this to 10M+ users |
 
 ---
 
@@ -198,11 +242,11 @@ Anomaly detection fires on:
 **Why 5 databases?**
 Each store is chosen for what it does best — no single database handles semantic search, graph traversal, document flexibility, and analytical aggregation equally well.
 
+**Why `intfloat/e5-large-v2` for embeddings?**
+It outputs exactly 1024 dimensions as required, runs on CPU with no GPU needed, and ranks consistently at the top of the MTEB benchmark.
+
 **Why Python DAG over Airflow by default?**
 The pipeline is structured so each stage is a pure function. The `dags/pipeline_dag.py` wraps each in a `PythonOperator` with zero logic changes — swap the scheduler, not the code.
-
-**Why `intfloat/e5-large-v2` for embeddings?**
-It is the only strong open-source model that outputs exactly 1024 dimensions as required, runs on CPU with no GPU needed, and ranks consistently at the top of the MTEB benchmark.
 
 **Why Redis TTL caching?**
 The recommendation endpoint makes 3 DB round-trips on a cache miss (~200ms). Redis reduces repeat queries to ~2ms. 5-minute TTL balances freshness vs latency; cache is also actively invalidated on new pipeline runs.
@@ -218,9 +262,10 @@ docker compose logs -f
 # Wipe everything and start fresh
 docker compose down -v && docker compose up -d
 
-# Neo4j graph browser
-open http://localhost:7474        # neo4j / neo4j123
-
-# MinIO console (Milvus storage)
-open http://localhost:9001        # minioadmin / minioadmin123
+# Check pipeline run history
+python -c "
+import sqlite3; conn = sqlite3.connect('data/analytics.db')
+conn.row_factory = sqlite3.Row
+for r in conn.execute('SELECT * FROM pipeline_runs').fetchall(): print(dict(r))
+"
 ```

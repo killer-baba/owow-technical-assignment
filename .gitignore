@@ -1,5 +1,5 @@
 # Environment & secrets
-.env
+# .env Commenting .env because it contains important data to run this project and it is not sensitive
 *.env.local
 
 # Python

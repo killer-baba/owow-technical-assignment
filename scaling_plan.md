@@ -11,7 +11,7 @@ and cost-efficient infrastructure.
 | Dimension | Current |
 |---|---|
 | Users | ~100s in sample data |
-| Vector index | Milvus standalone, IVF_FLAT, 768-dim |
+| Vector index | Milvus standalone, IVF_FLAT, 1024-dim |
 | Graph DB | Neo4j single node |
 | MongoDB | Single node, no replica set |
 | Redis | Single node |
@@ -186,7 +186,7 @@ messages. Kafka's consumer groups allow independent scaling of each processing
 stage.
 
 **Embedding throughput:** a single CPU process can embed ~50 messages/second
-with `all-mpnet-base-v2`. At 10,000 messages/second, deploy 200 embedding
+with `intfloat/e5-large-v2`. At 10,000 messages/second, deploy 200 embedding
 workers — or switch to a GPU inference server (TGI, vLLM) that batches
 requests and achieves 2,000+ embeddings/second on a single A10G GPU.
 
